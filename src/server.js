@@ -238,7 +238,7 @@ async function ensureGatewayRunning() {
       try {
         lastGatewayError = null;
         await startGateway();
-        const ready = await waitForGatewayReady({ timeoutMs: 20_000 });
+        const ready = await waitForGatewayReady({ timeoutMs: 60_000 });
         if (!ready) {
           throw new Error("Gateway did not become ready in time");
         }
@@ -300,7 +300,41 @@ app.disable("x-powered-by");
 app.use(express.json({ limit: "1mb" }));
 
 // Minimal health endpoint for Railway.
-app.get("/setup/healthz", (_req, res) => res.json({ ok: true }));
+app.get("/setup/healthz", async (_req, res) => {
+  if (!isConfigured()) {
+    return res.status(503).json({
+      ok: false,
+      configured: false,
+      gateway: "not_configured",
+      target: GATEWAY_TARGET,
+    });
+  }
+
+  let gatewayReachable = false;
+  try {
+    gatewayReachable = await probeGateway();
+  } catch {
+    gatewayReachable = false;
+  }
+
+  if (!gatewayReachable) {
+    return res.status(503).json({
+      ok: false,
+      configured: true,
+      gateway: "not_ready",
+      target: GATEWAY_TARGET,
+      lastError: lastGatewayError,
+      lastExit: lastGatewayExit,
+    });
+  }
+
+  return res.status(200).json({
+    ok: true,
+    configured: true,
+    gateway: "ready",
+    target: GATEWAY_TARGET,
+  });
+});
 
 async function probeGateway() {
   // Don't assume HTTP — the gateway primarily speaks WebSocket.
